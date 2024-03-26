@@ -64,13 +64,33 @@ func (c *BunqClient) LoadInstallation() error {
 		return err
 	}
 
-	var installation BunqInstallation
-	if err := json.Unmarshal(response, &installation); err != nil {
+	var installationResponse BunqInstallationResponse
+	if err := json.Unmarshal(response, &installationResponse); err != nil {
 		return err
 	}
-	c.installation = installation
 
-	if err := os.WriteFile(c.installationLocation, response, 0700); err != nil {
+	installation := BunqInstallation{}
+	for _, item := range installationResponse.Response {
+		if item.Id != nil {
+			installation.Id = item.Id
+		}
+
+		if item.Token != nil {
+			installation.Token = item.Token
+		}
+
+		if item.ServerPublicKey != nil {
+			installation.ServerPublicKey = item.ServerPublicKey
+		}
+	}
+
+	c.installation = installation
+	installationJson, err := json.Marshal(c.installation)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(c.installationLocation, installationJson, 0700); err != nil {
 		return err
 	}
 

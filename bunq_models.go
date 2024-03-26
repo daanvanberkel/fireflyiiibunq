@@ -4,6 +4,10 @@ type BunqInstallationRequest struct {
 	ClientPublicKey string `json:"client_public_key"`
 }
 
+type BunqInstallationResponse struct {
+	Response []*BunqInstallation `json:"Response"`
+}
+
 type BunqInstallation struct {
 	Id              *BunqInstallationId              `json:"Id"`
 	Token           *BunqInstallationToken           `json:"Token"`
