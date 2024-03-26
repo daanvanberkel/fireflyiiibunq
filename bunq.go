@@ -23,6 +23,7 @@ type BunqClient struct {
 }
 
 func NewBunqClient() BunqClient {
+	// TODO: Get storage location from env var or default location
 	return BunqClient{
 		apiBaseUrl:           "https://public-api.sandbox.bunq.com/v1",
 		privateKeyLocation:   "key.rsa",
@@ -33,6 +34,7 @@ func NewBunqClient() BunqClient {
 }
 
 func (c *BunqClient) LoadInstallation() error {
+
 	// Try to load installation from storage
 	if _, err := os.Stat(c.installationLocation); err == nil {
 		data, err := os.ReadFile(c.installationLocation)
@@ -68,50 +70,61 @@ func (c *BunqClient) LoadInstallation() error {
 	}
 	c.installation = installation
 
+	if err := os.WriteFile(c.installationLocation, response, 0700); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (c *BunqClient) getKeyPair() ([]byte, []byte, error) {
+func (c *BunqClient) getKeyPair() (string, string, error) {
 	keyFileName := c.privateKeyLocation
 	pubKeyFileName := c.publicKeyLocation
 	bitSize := 2048
 
-	// TODO: Get storage location from env var or default location
 	if _, err := os.Stat(keyFileName); err == nil {
 		if _, err := os.Stat(pubKeyFileName); err == nil {
 			privateKey, err := os.ReadFile(keyFileName)
 			if err != nil {
-				return nil, nil, err
+				return "", "", err
 			}
 
 			publicKey, err := os.ReadFile(pubKeyFileName)
 			if err != nil {
-				return nil, nil, err
+				return "", "", err
 			}
 
-			return privateKey, publicKey, nil
+			return string(privateKey), string(publicKey), nil
 		}
 	}
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
 	if err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
 
-	publicKey := privateKey.Public()
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return "", "", err
+	}
 
-	privateKeyPem := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
-	publicKeyPem := pem.EncodeToMemory(&pem.Block{Type: "RSA PUBLIC KEY", Bytes: x509.MarshalPKCS1PublicKey(publicKey.(*rsa.PublicKey))})
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(privateKey.Public())
+	if err != nil {
+		return "", "", err
+	}
+
+	privateKeyPem := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyBytes})
+	publicKeyPem := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyBytes})
 
 	if err := os.WriteFile(keyFileName, privateKeyPem, 0700); err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
 
 	if err := os.WriteFile(pubKeyFileName, publicKeyPem, 0700); err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
 
-	return privateKeyPem, publicKeyPem, nil
+	return string(privateKeyPem), string(publicKeyPem), nil
 }
 
 func (c *BunqClient) doBunqRequest(method string, path string, data interface{}) ([]byte, error) {

@@ -1,16 +1,24 @@
 package main
 
 type BunqInstallationRequest struct {
-	ClientPublicKey []byte `json:"client_public_key"`
+	ClientPublicKey string `json:"client_public_key"`
 }
 
 type BunqInstallation struct {
+	Id              *BunqInstallationId              `json:"Id"`
 	Token           *BunqInstallationToken           `json:"Token"`
 	ServerPublicKey *BunqInstallationServerPublicKey `json:"ServerPublicKey"`
 }
 
+type BunqInstallationId struct {
+	Id int32 `json:"id"`
+}
+
 type BunqInstallationToken struct {
-	Token string `json:"token"`
+	Id      int32  `json:"id"`
+	Created string `json:"created"`
+	Updated string `json:"updated"`
+	Token   string `json:"token"`
 }
 
 type BunqInstallationServerPublicKey struct {
