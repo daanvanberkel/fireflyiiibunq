@@ -1,5 +1,5 @@
-*.rsa*
-installation.json
+storage/
+.env
 
 # Binaries for programs and plugins
 *.exe

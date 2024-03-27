@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -15,25 +18,34 @@ import (
 
 type BunqClient struct {
 	apiBaseUrl           string
+	apiKey               string
 	privateKeyLocation   string
 	publicKeyLocation    string
 	installationLocation string
+	deviceServerLocation string
 	httpClient           *http.Client
 	installation         BunqInstallation
+	privateKey           *rsa.PrivateKey
 }
 
-func NewBunqClient() BunqClient {
+func NewBunqClient(apiKey string) BunqClient {
 	// TODO: Get storage location from env var or default location
 	return BunqClient{
 		apiBaseUrl:           "https://public-api.sandbox.bunq.com/v1",
-		privateKeyLocation:   "key.rsa",
-		publicKeyLocation:    "key.rsa.pub",
-		installationLocation: "installation.json",
+		apiKey:               apiKey,
+		privateKeyLocation:   "storage/key.rsa",
+		publicKeyLocation:    "storage/key.rsa.pub",
+		installationLocation: "storage/installation.json",
+		deviceServerLocation: "storage/device-server.json",
 		httpClient:           &http.Client{},
 	}
 }
 
 func (c *BunqClient) LoadInstallation() error {
+	_, publicKey, err := c.getKeyPair()
+	if err != nil {
+		return err
+	}
 
 	// Try to load installation from storage
 	if _, err := os.Stat(c.installationLocation); err == nil {
@@ -52,11 +64,6 @@ func (c *BunqClient) LoadInstallation() error {
 	}
 
 	// Generate new installation
-	_, publicKey, err := c.getKeyPair()
-	if err != nil {
-		return err
-	}
-
 	response, err := c.doBunqRequest("POST", "/installation", BunqInstallationRequest{
 		ClientPublicKey: publicKey,
 	})
@@ -97,6 +104,44 @@ func (c *BunqClient) LoadInstallation() error {
 	return nil
 }
 
+func (c *BunqClient) LoadDeviceServer() error {
+	if _, err := os.Stat(c.deviceServerLocation); err == nil {
+		return nil
+	}
+
+	response, err := c.doBunqRequest("POST", "/device-server", BunqDeviceServerRequest{
+		Description:  "FireFlyIIIBynqSync",
+		Secret:       c.apiKey,
+		PermittedIps: []string{"*"}, // TODO: Make permitted ips configurable
+	})
+	if err != nil {
+		return err
+	}
+
+	var deviceServerResponse BunqDeviceServerResponse
+	if err := json.Unmarshal(response, &deviceServerResponse); err != nil {
+		return err
+	}
+
+	deviceServer := BunqDeviceServer{}
+	for _, item := range deviceServerResponse.Response {
+		if item.Id != nil {
+			deviceServer.Id = item.Id
+		}
+	}
+
+	deviceServerJson, err := json.Marshal(deviceServer)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(c.deviceServerLocation, deviceServerJson, 0700); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *BunqClient) getKeyPair() (string, string, error) {
 	keyFileName := c.privateKeyLocation
 	pubKeyFileName := c.publicKeyLocation
@@ -113,6 +158,14 @@ func (c *BunqClient) getKeyPair() (string, string, error) {
 			if err != nil {
 				return "", "", err
 			}
+
+			keyBlock, _ := pem.Decode(privateKey)
+			key, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+			if err != nil {
+				return "", "", err
+			}
+
+			c.privateKey = key.(*rsa.PrivateKey)
 
 			return string(privateKey), string(publicKey), nil
 		}
@@ -144,6 +197,8 @@ func (c *BunqClient) getKeyPair() (string, string, error) {
 		return "", "", err
 	}
 
+	c.privateKey = privateKey
+
 	return string(privateKeyPem), string(publicKeyPem), nil
 }
 
@@ -160,6 +215,22 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 	}
 	req.Header.Set("User-Agent", "FireflyIIIBunqSync/1")
 
+	if c.installation.Token != nil {
+		req.Header.Set("X-Bunq-Client-Authentication", c.installation.Token.Token)
+	}
+
+	if len(body) > 0 && c.privateKey != nil {
+		hashedBody := sha256.Sum256(body)
+
+		signature, err := rsa.SignPKCS1v15(rand.Reader, c.privateKey, crypto.SHA256, hashedBody[:])
+		if err != nil {
+			return nil, err
+		}
+
+		base64Signature := base64.StdEncoding.EncodeToString(signature)
+		req.Header.Set("X-Bunq-Client-Signature", base64Signature)
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -174,5 +245,8 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, errors.New(string(respBody))
 	}
+
+	// TODO: Validate response signature
+
 	return respBody, nil
 }
