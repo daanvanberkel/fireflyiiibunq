@@ -26,6 +26,7 @@ type BunqClient struct {
 	httpClient           *http.Client
 	installation         BunqInstallation
 	privateKey           *rsa.PrivateKey
+	bunqServerPublicKey  *rsa.PublicKey
 }
 
 func NewBunqClient(apiKey string) BunqClient {
@@ -60,6 +61,11 @@ func (c *BunqClient) LoadInstallation() error {
 		}
 
 		c.installation = installation
+
+		if err := c.parseBunqServerPublicKey(); err != nil {
+			return err
+		}
+
 		return nil
 	}
 
@@ -98,6 +104,10 @@ func (c *BunqClient) LoadInstallation() error {
 	}
 
 	if err := os.WriteFile(c.installationLocation, installationJson, 0700); err != nil {
+		return err
+	}
+
+	if err := c.parseBunqServerPublicKey(); err != nil {
 		return err
 	}
 
@@ -242,11 +252,32 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 		return nil, err
 	}
 
+	if len(respBody) > 0 && c.bunqServerPublicKey != nil {
+		hashedBody := sha256.Sum256(respBody)
+		serverSignature, err := base64.StdEncoding.DecodeString(resp.Header.Get("X-Bunq-Server-Signature"))
+		if err != nil {
+			return nil, err
+		}
+
+		if err := rsa.VerifyPKCS1v15(c.bunqServerPublicKey, crypto.SHA256, hashedBody[:], serverSignature); err != nil {
+			return nil, err
+		}
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, errors.New(string(respBody))
 	}
 
-	// TODO: Validate response signature
-
 	return respBody, nil
+}
+
+func (c *BunqClient) parseBunqServerPublicKey() error {
+	bunqPublicKey, _ := pem.Decode([]byte(c.installation.ServerPublicKey.ServicePublicKey))
+	bunqServerPublicKey, err := x509.ParsePKIXPublicKey(bunqPublicKey.Bytes)
+	if err != nil {
+		return err
+	}
+	c.bunqServerPublicKey = bunqServerPublicKey.(*rsa.PublicKey)
+
+	return nil
 }
