@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 func main() {
 	config, err := LoadConfig()
 	if err != nil {
@@ -16,4 +18,10 @@ func main() {
 	if err := client.LoadDeviceServer(); err != nil {
 		panic(err)
 	}
+
+	bankAccounts, err := client.GetMonetaryBankAccounts()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(bankAccounts)
 }

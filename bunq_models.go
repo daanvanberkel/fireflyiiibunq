@@ -1,5 +1,14 @@
 package main
 
+// BUNQ COMMON MODELS
+type BunqId struct {
+	Id int32 `json:"id"`
+}
+
+type BunqUserPerson struct {
+	Id int `json:"id"`
+}
+
 // BUNQ INSTALLATION MODELS
 
 type BunqInstallationRequest struct {
@@ -11,13 +20,9 @@ type BunqInstallationResponse struct {
 }
 
 type BunqInstallation struct {
-	Id              *BunqInstallationId              `json:"Id"`
+	Id              *BunqId                          `json:"Id"`
 	Token           *BunqInstallationToken           `json:"Token"`
 	ServerPublicKey *BunqInstallationServerPublicKey `json:"ServerPublicKey"`
-}
-
-type BunqInstallationId struct {
-	Id int32 `json:"id"`
 }
 
 type BunqInstallationToken struct {
@@ -44,9 +49,40 @@ type BunqDeviceServerResponse struct {
 }
 
 type BunqDeviceServer struct {
-	Id *BunqDeviceServerId `json:"Id"`
+	Id *BunqId `json:"Id"`
 }
 
-type BunqDeviceServerId struct {
-	Id int32 `json:"id"`
+// BUNQ SESSION SERVER MODELS
+
+type BunqSessionServerRequest struct {
+	Secret string `json:"secret"`
+}
+
+type BunqSessionServerResponse struct {
+	Response []*BunqSessionServer `json:"Response"`
+}
+
+type BunqSessionServer struct {
+	Id         *BunqId                 `json:"Id"`
+	Token      *BunqSessionServerToken `json:"Token"`
+	UserPerson *BunqUserPerson         `json:"UserPerson"`
+}
+
+type BunqSessionServerToken struct {
+	Id    int32  `json:"id"`
+	Token string `json:"token"`
+}
+
+// BUNQ MONETARY ACCOUNT BANK MODELS
+
+type BunqMonetaryAccountBankResponse struct {
+	Response []*BunqMonetaryAccountBank `json:"Response"`
+}
+
+type BunqMonetaryAccountBank struct {
+	Id          int32  `json:"id"`
+	Created     string `json:"created"`
+	Updated     string `json:"updated"`
+	Currency    string `json:"currency"`
+	Description string `json:"description"`
 }

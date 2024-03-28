@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 type BunqClient struct {
@@ -21,6 +22,7 @@ type BunqClient struct {
 	installation        BunqInstallation
 	keyChain            *Keychain
 	bunqServerPublicKey *rsa.PublicKey
+	session             *BunqSessionServer
 }
 
 func NewBunqClient(config *Config) (*BunqClient, error) {
@@ -143,6 +145,65 @@ func (c *BunqClient) LoadDeviceServer() error {
 	return nil
 }
 
+func (c *BunqClient) GetMonetaryBankAccounts() ([]*BunqMonetaryAccountBank, error) {
+	if err := c.ensureSessionIsStarted(); err != nil {
+		return nil, err
+	}
+
+	response, err := c.doBunqRequest("GET", "/user/"+strconv.Itoa(c.session.UserPerson.Id)+"/monetary-account-bank", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var monetaryBankAccountResponse BunqMonetaryAccountBankResponse
+	if err := json.Unmarshal(response, &monetaryBankAccountResponse); err != nil {
+		return nil, err
+	}
+
+	return monetaryBankAccountResponse.Response, nil
+}
+
+func (c *BunqClient) ensureSessionIsStarted() error {
+	if c.session != nil {
+		if _, err := c.doBunqRequest("GET", "/user", nil); err == nil {
+			return nil
+		}
+		// Session is no longer valid, start a new session
+		c.session = nil
+	}
+
+	response, err := c.doBunqRequest("POST", "/session-server", BunqSessionServerRequest{
+		Secret: c.config.BunqConfig.ApiKey,
+	})
+	if err != nil {
+		return err
+	}
+
+	var sessionServerResponse BunqSessionServerResponse
+	if err := json.Unmarshal(response, &sessionServerResponse); err != nil {
+		return err
+	}
+
+	sessionServer := BunqSessionServer{}
+	for _, item := range sessionServerResponse.Response {
+		if item.Id != nil {
+			sessionServer.Id = item.Id
+		}
+
+		if item.Token != nil {
+			sessionServer.Token = item.Token
+		}
+
+		if item.UserPerson != nil {
+			sessionServer.UserPerson = item.UserPerson
+		}
+	}
+
+	c.session = &sessionServer
+
+	return nil
+}
+
 func (c *BunqClient) doBunqRequest(method string, path string, data interface{}) ([]byte, error) {
 	body, err := json.Marshal(data)
 	if err != nil {
@@ -154,10 +215,15 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "FireflyIIIBunqSync/1")
+	req.Header.Set("User-Agent", c.config.BunqConfig.UserAgent)
 
 	if c.installation.Token != nil {
 		req.Header.Set("X-Bunq-Client-Authentication", c.installation.Token.Token)
+	}
+
+	// Session token has higher priority than installation token
+	if c.session != nil {
+		req.Header.Set("X-Bunq-Client-Authentication", c.session.Token.Token)
 	}
 
 	if len(body) > 0 {
