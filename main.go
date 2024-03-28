@@ -1,13 +1,18 @@
 package main
 
-import "os"
-
 func main() {
-	client := NewBunqClient(os.Getenv("BUNQ_API_KEY"))
-	if err := client.LoadInstallation(); err != nil {
+	config, err := LoadConfig()
+	if err != nil {
 		panic(err)
 	}
 
+	client, err := NewBunqClient(config)
+	if err != nil {
+		panic(err)
+	}
+	if err := client.LoadInstallation(); err != nil {
+		panic(err)
+	}
 	if err := client.LoadDeviceServer(); err != nil {
 		panic(err)
 	}

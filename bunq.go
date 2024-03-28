@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -17,40 +16,31 @@ import (
 )
 
 type BunqClient struct {
-	apiBaseUrl           string
-	apiKey               string
-	privateKeyLocation   string
-	publicKeyLocation    string
-	installationLocation string
-	deviceServerLocation string
-	httpClient           *http.Client
-	installation         BunqInstallation
-	privateKey           *rsa.PrivateKey
-	bunqServerPublicKey  *rsa.PublicKey
+	config              *Config
+	httpClient          *http.Client
+	installation        BunqInstallation
+	keyChain            *Keychain
+	bunqServerPublicKey *rsa.PublicKey
 }
 
-func NewBunqClient(apiKey string) BunqClient {
-	// TODO: Get storage location from env var or default location
-	return BunqClient{
-		apiBaseUrl:           "https://public-api.sandbox.bunq.com/v1",
-		apiKey:               apiKey,
-		privateKeyLocation:   "storage/key.rsa",
-		publicKeyLocation:    "storage/key.rsa.pub",
-		installationLocation: "storage/installation.json",
-		deviceServerLocation: "storage/device-server.json",
-		httpClient:           &http.Client{},
+func NewBunqClient(config *Config) (*BunqClient, error) {
+	keyChain, err := NewKeyChain(config.StorageLocation+config.BunqConfig.PrivateKeyFileName, config.StorageLocation+config.BunqConfig.PublicKeyFileName, 2048)
+	if err != nil {
+		return nil, err
 	}
+
+	return &BunqClient{
+		config:     config,
+		httpClient: &http.Client{},
+		keyChain:   keyChain,
+	}, nil
 }
 
 func (c *BunqClient) LoadInstallation() error {
-	_, publicKey, err := c.getKeyPair()
-	if err != nil {
-		return err
-	}
-
 	// Try to load installation from storage
-	if _, err := os.Stat(c.installationLocation); err == nil {
-		data, err := os.ReadFile(c.installationLocation)
+	installationPath := c.config.StorageLocation + c.config.BunqConfig.InstallationFileName
+	if _, err := os.Stat(installationPath); err == nil {
+		data, err := os.ReadFile(installationPath)
 		if err != nil {
 			return err
 		}
@@ -71,7 +61,7 @@ func (c *BunqClient) LoadInstallation() error {
 
 	// Generate new installation
 	response, err := c.doBunqRequest("POST", "/installation", BunqInstallationRequest{
-		ClientPublicKey: publicKey,
+		ClientPublicKey: string(c.keyChain.PublicKeyPem),
 	})
 	if err != nil {
 		return err
@@ -103,7 +93,7 @@ func (c *BunqClient) LoadInstallation() error {
 		return err
 	}
 
-	if err := os.WriteFile(c.installationLocation, installationJson, 0700); err != nil {
+	if err := os.WriteFile(installationPath, installationJson, 0700); err != nil {
 		return err
 	}
 
@@ -115,14 +105,15 @@ func (c *BunqClient) LoadInstallation() error {
 }
 
 func (c *BunqClient) LoadDeviceServer() error {
-	if _, err := os.Stat(c.deviceServerLocation); err == nil {
+	deviceServerPath := c.config.StorageLocation + c.config.BunqConfig.DeviceServerFileName
+	if _, err := os.Stat(deviceServerPath); err == nil {
 		return nil
 	}
 
 	response, err := c.doBunqRequest("POST", "/device-server", BunqDeviceServerRequest{
-		Description:  "FireFlyIIIBynqSync",
-		Secret:       c.apiKey,
-		PermittedIps: []string{"*"}, // TODO: Make permitted ips configurable
+		Description:  c.config.BunqConfig.UserAgent,
+		Secret:       c.config.BunqConfig.ApiKey,
+		PermittedIps: c.config.BunqConfig.PermittedIps,
 	})
 	if err != nil {
 		return err
@@ -145,71 +136,11 @@ func (c *BunqClient) LoadDeviceServer() error {
 		return err
 	}
 
-	if err := os.WriteFile(c.deviceServerLocation, deviceServerJson, 0700); err != nil {
+	if err := os.WriteFile(deviceServerPath, deviceServerJson, 0700); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func (c *BunqClient) getKeyPair() (string, string, error) {
-	keyFileName := c.privateKeyLocation
-	pubKeyFileName := c.publicKeyLocation
-	bitSize := 2048
-
-	if _, err := os.Stat(keyFileName); err == nil {
-		if _, err := os.Stat(pubKeyFileName); err == nil {
-			privateKey, err := os.ReadFile(keyFileName)
-			if err != nil {
-				return "", "", err
-			}
-
-			publicKey, err := os.ReadFile(pubKeyFileName)
-			if err != nil {
-				return "", "", err
-			}
-
-			keyBlock, _ := pem.Decode(privateKey)
-			key, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
-			if err != nil {
-				return "", "", err
-			}
-
-			c.privateKey = key.(*rsa.PrivateKey)
-
-			return string(privateKey), string(publicKey), nil
-		}
-	}
-
-	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
-	if err != nil {
-		return "", "", err
-	}
-
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		return "", "", err
-	}
-
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(privateKey.Public())
-	if err != nil {
-		return "", "", err
-	}
-
-	privateKeyPem := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyBytes})
-	publicKeyPem := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyBytes})
-
-	if err := os.WriteFile(keyFileName, privateKeyPem, 0700); err != nil {
-		return "", "", err
-	}
-
-	if err := os.WriteFile(pubKeyFileName, publicKeyPem, 0700); err != nil {
-		return "", "", err
-	}
-
-	c.privateKey = privateKey
-
-	return string(privateKeyPem), string(publicKeyPem), nil
 }
 
 func (c *BunqClient) doBunqRequest(method string, path string, data interface{}) ([]byte, error) {
@@ -218,7 +149,7 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 		return nil, err
 	}
 
-	url := c.apiBaseUrl + path
+	url := c.config.BunqConfig.ApiBaseUrl + path
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
@@ -229,15 +160,11 @@ func (c *BunqClient) doBunqRequest(method string, path string, data interface{})
 		req.Header.Set("X-Bunq-Client-Authentication", c.installation.Token.Token)
 	}
 
-	if len(body) > 0 && c.privateKey != nil {
-		hashedBody := sha256.Sum256(body)
-
-		signature, err := rsa.SignPKCS1v15(rand.Reader, c.privateKey, crypto.SHA256, hashedBody[:])
+	if len(body) > 0 {
+		base64Signature, err := c.keyChain.Sign(body)
 		if err != nil {
 			return nil, err
 		}
-
-		base64Signature := base64.StdEncoding.EncodeToString(signature)
 		req.Header.Set("X-Bunq-Client-Signature", base64Signature)
 	}
 
