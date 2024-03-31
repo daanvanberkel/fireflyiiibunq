@@ -1,4 +1,4 @@
-module github.com/daanvanberkel/firefly-iii-bunq-sync
+module github.com/daanvanberkel/fireflyiiibunq
 
 go 1.22.0
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/daanvanberkel/fireflyiiibunq/bunq"
+	"github.com/daanvanberkel/fireflyiiibunq/util"
 	"github.com/sirupsen/logrus"
 )
 
@@ -13,19 +15,13 @@ func main() {
 	log.Level = logrus.DebugLevel
 	log.Out = os.Stdout
 
-	config, err := LoadConfig()
+	config, err := util.LoadConfig()
 	if err != nil {
 		panic(err)
 	}
 
-	client, err := NewBunqClient(config, log)
+	client, err := bunq.NewBunqClient(config, log)
 	if err != nil {
-		panic(err)
-	}
-	if err := client.LoadInstallation(); err != nil {
-		panic(err)
-	}
-	if err := client.LoadDeviceServer(); err != nil {
 		panic(err)
 	}
 

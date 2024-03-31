@@ -11,6 +11,14 @@
             "mode": "auto",
             "program": "${fileDirname}",
             "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Launch main.go",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "main.go",
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }
