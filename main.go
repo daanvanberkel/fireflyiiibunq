@@ -30,11 +30,22 @@ func main() {
 	}
 
 	for _, bankAccount := range bankAccounts {
-		payments, err := client.GetPayments(bankAccount.Id)
-		if err != nil {
-			panic(err)
-		}
+		lastId := 0
+		for {
+			payments, err := client.GetPayments(bankAccount.Id, lastId)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 
-		fmt.Println(payments)
+			if len(payments) == 0 {
+				break
+			}
+
+			fmt.Println(payments)
+			// TODO: Create payment in firefly for every bunq payment until the first payment that is already in firefly
+
+			lastId = payments[len(payments)-1].Id
+		}
 	}
 }
