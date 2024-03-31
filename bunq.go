@@ -14,6 +14,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 type BunqClient struct {
@@ -23,9 +26,10 @@ type BunqClient struct {
 	keyChain            *Keychain
 	bunqServerPublicKey *rsa.PublicKey
 	session             *BunqSessionServer
+	log                 *logrus.Logger
 }
 
-func NewBunqClient(config *Config) (*BunqClient, error) {
+func NewBunqClient(config *Config, log *logrus.Logger) (*BunqClient, error) {
 	keyChain, err := NewKeyChain(config.StorageLocation+config.BunqConfig.PrivateKeyFileName, config.StorageLocation+config.BunqConfig.PublicKeyFileName, 2048)
 	if err != nil {
 		return nil, err
@@ -35,6 +39,7 @@ func NewBunqClient(config *Config) (*BunqClient, error) {
 		config:     config,
 		httpClient: &http.Client{},
 		keyChain:   keyChain,
+		log:        log,
 	}, nil
 }
 
@@ -160,27 +165,72 @@ func (c *BunqClient) GetMonetaryBankAccounts() ([]*BunqMonetaryAccountBank, erro
 		return nil, err
 	}
 
-	return monetaryBankAccountResponse.Response, nil
+	result := make([]*BunqMonetaryAccountBank, len(monetaryBankAccountResponse.Response))
+	for i, account := range monetaryBankAccountResponse.Response {
+		result[i] = account.MonetaryAccountBank
+	}
+
+	return result, nil
 }
 
 func (c *BunqClient) ensureSessionIsStarted() error {
 	if c.session != nil {
 		if _, err := c.doBunqRequest("GET", "/user", nil); err == nil {
+			c.log.Debug("Reusing session from memory")
 			return nil
 		}
+
 		// Session is no longer valid, start a new session
+		c.log.Debug("Memory session is no longer valid")
+		c.session = nil
+
+		return c.startNewSession()
+	}
+
+	sessionServerLocation := c.config.StorageLocation + c.config.BunqConfig.SessionServerFileName
+	if _, err := os.Stat(sessionServerLocation); err == nil {
+		sessionServerJson, err := os.ReadFile(sessionServerLocation)
+		if err != nil {
+			c.log.WithError(err).Error("Cannot read session file from storage")
+			return err
+		}
+
+		var sessionServer BunqSessionServer
+		if err := json.Unmarshal(sessionServerJson, &sessionServer); err != nil {
+			os.Remove(sessionServerLocation)
+			c.log.WithError(err).Error("Cannot unmarshal stored session")
+			return err
+		}
+
+		c.session = &sessionServer
+
+		if _, err := c.doBunqRequest("GET", "/user", nil); err == nil {
+			c.log.Debug("Reusing session from storage")
+			return nil
+		}
+
+		// Session is no longer valid, start a new session
+		c.log.Debug("Stored session is no longer valid")
 		c.session = nil
 	}
+
+	return c.startNewSession()
+}
+
+func (c *BunqClient) startNewSession() error {
+	c.log.Debug("Start new session")
 
 	response, err := c.doBunqRequest("POST", "/session-server", BunqSessionServerRequest{
 		Secret: c.config.BunqConfig.ApiKey,
 	})
 	if err != nil {
+		c.log.WithError(err).Error("Starting new session failed")
 		return err
 	}
 
 	var sessionServerResponse BunqSessionServerResponse
 	if err := json.Unmarshal(response, &sessionServerResponse); err != nil {
+		c.log.WithError(err).Error("Unmarshal session response failed")
 		return err
 	}
 
@@ -199,65 +249,117 @@ func (c *BunqClient) ensureSessionIsStarted() error {
 		}
 	}
 
+	sessionServerJson, err := json.Marshal(sessionServer)
+	if err != nil {
+		c.log.WithError(err).Error("Marshal session server failed")
+		return err
+	}
+
+	sessionServerLocation := c.config.StorageLocation + c.config.BunqConfig.SessionServerFileName
+	if err := os.WriteFile(sessionServerLocation, sessionServerJson, 0700); err != nil {
+		os.Remove(sessionServerLocation)
+		c.log.WithError(err).Error("Cannot write session to storage")
+		return err
+	}
+	c.log.Debug("Store session in storage")
+
 	c.session = &sessionServer
 
 	return nil
 }
 
 func (c *BunqClient) doBunqRequest(method string, path string, data interface{}) ([]byte, error) {
+	requestId := uuid.New()
+	log := c.log.WithField("requestId", requestId.String())
+
 	body, err := json.Marshal(data)
 	if err != nil {
+		log.WithError(err).Error("Cannot marshal request body")
 		return nil, err
 	}
 
 	url := c.config.BunqConfig.ApiBaseUrl + path
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
 	if err != nil {
+		log.WithError(err).Error("Cannot create new request")
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.config.BunqConfig.UserAgent)
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("X-Bunq-Client-Request-Id", requestId.String())
 
-	if c.installation.Token != nil {
+	if c.installation.Token != nil && c.session == nil {
+		log.Debug("Use installation token for bunq authentication")
 		req.Header.Set("X-Bunq-Client-Authentication", c.installation.Token.Token)
 	}
 
 	// Session token has higher priority than installation token
 	if c.session != nil {
+		log.Debug("Use session token for bunq authentication")
 		req.Header.Set("X-Bunq-Client-Authentication", c.session.Token.Token)
 	}
 
 	if len(body) > 0 {
 		base64Signature, err := c.keyChain.Sign(body)
 		if err != nil {
+			log.WithError(err).Error("Cannot sign request body")
 			return nil, err
 		}
+		log.Debug("Generated signature for bunq request")
 		req.Header.Set("X-Bunq-Client-Signature", base64Signature)
 	}
 
+	log.WithFields(
+		logrus.Fields{
+			"method": method,
+			"path":   path,
+		},
+	).Debug("Send bunq request")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.WithError(err).Error("Cannot send request")
 		return nil, err
 	}
 
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.WithError(err).Error("Cannot read bunq response body")
 		return nil, err
 	}
 
-	if len(respBody) > 0 && c.bunqServerPublicKey != nil {
+	log.WithFields(
+		logrus.Fields{
+			"statusCode":        resp.StatusCode,
+			"bodyLength":        len(respBody),
+			"responseRequestId": resp.Header.Get("X-Bunq-Client-Request-Id"),
+		},
+	).Debug("Response received from bunq")
+
+	if resp.Header.Get("X-Bunq-Client-Request-Id") != requestId.String() {
+		log.Error("Received response for another request")
+		return nil, errors.New("received response for another request")
+	}
+
+	// TODO: Make all calls verify the signature, for now only the session-server call works. All other calls fail for some reason
+	if len(respBody) > 0 && c.bunqServerPublicKey != nil && path == "/session-server" {
 		hashedBody := sha256.Sum256(respBody)
 		serverSignature, err := base64.StdEncoding.DecodeString(resp.Header.Get("X-Bunq-Server-Signature"))
 		if err != nil {
+			log.WithError(err).Error("Cannot decode bunq server signature")
 			return nil, err
 		}
 
 		if err := rsa.VerifyPKCS1v15(c.bunqServerPublicKey, crypto.SHA256, hashedBody[:], serverSignature); err != nil {
+			log.WithError(err).Error("Cannot verify bunq server signature")
 			return nil, err
 		}
+
+		log.Debug("Bunq server signature verified successfully")
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.WithField("body", respBody).Warn("Received error from bunq")
 		return nil, errors.New(string(respBody))
 	}
 
@@ -268,6 +370,7 @@ func (c *BunqClient) parseBunqServerPublicKey() error {
 	bunqPublicKey, _ := pem.Decode([]byte(c.installation.ServerPublicKey.ServicePublicKey))
 	bunqServerPublicKey, err := x509.ParsePKIXPublicKey(bunqPublicKey.Bytes)
 	if err != nil {
+		c.log.WithError(err).Error("Cannot decode bunq server public key")
 		return err
 	}
 	c.bunqServerPublicKey = bunqServerPublicKey.(*rsa.PublicKey)

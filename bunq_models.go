@@ -76,7 +76,11 @@ type BunqSessionServerToken struct {
 // BUNQ MONETARY ACCOUNT BANK MODELS
 
 type BunqMonetaryAccountBankResponse struct {
-	Response []*BunqMonetaryAccountBank `json:"Response"`
+	Response []*BunqMonetaryAccountBankItem `json:"Response"`
+}
+
+type BunqMonetaryAccountBankItem struct {
+	MonetaryAccountBank *BunqMonetaryAccountBank `json:"MonetaryAccountBank"`
 }
 
 type BunqMonetaryAccountBank struct {

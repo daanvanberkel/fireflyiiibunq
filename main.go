@@ -1,14 +1,24 @@
 package main
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/sirupsen/logrus"
+)
 
 func main() {
+	log := logrus.New()
+	log.Level = logrus.DebugLevel
+	log.Out = os.Stdout
+
 	config, err := LoadConfig()
 	if err != nil {
 		panic(err)
 	}
 
-	client, err := NewBunqClient(config)
+	client, err := NewBunqClient(config, log)
 	if err != nil {
 		panic(err)
 	}
@@ -23,5 +33,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(bankAccounts)
+	fmt.Println(json.Marshal(bankAccounts))
 }

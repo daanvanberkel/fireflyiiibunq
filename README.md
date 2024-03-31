@@ -15,5 +15,6 @@ Configuration is done using environment variables:
 | BUNQ_PUBLIC_KEY_FILE_NAME | bunq_client.pub.key | |
 | BUNQ_INSTALLATION_FILE_NAME | bunq_installation.json | |
 | BUNQ_DEVICE_SERVER_FILE_NAME | bunq_device_server.json | |
+| BUNQ_SESSION_SERVER_FILE_NAME | bunq_session_server.json | |
 | BUNQ_USER_AGENT | BunqFireflySync/1.0 | |
 | BUNQ_PERMITTED_IPS | * | Comma-separated list with all ips that are allowed to use the bunq api key |

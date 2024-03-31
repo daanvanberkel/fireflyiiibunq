@@ -7,14 +7,15 @@ import (
 )
 
 type BunqConfig struct {
-	ApiBaseUrl           string
-	ApiKey               string
-	PrivateKeyFileName   string
-	PublicKeyFileName    string
-	InstallationFileName string
-	DeviceServerFileName string
-	UserAgent            string
-	PermittedIps         []string
+	ApiBaseUrl            string
+	ApiKey                string
+	PrivateKeyFileName    string
+	PublicKeyFileName     string
+	InstallationFileName  string
+	DeviceServerFileName  string
+	SessionServerFileName string
+	UserAgent             string
+	PermittedIps          []string
 }
 
 type Config struct {
@@ -76,6 +77,11 @@ func loadBunqConfig() (*BunqConfig, error) {
 		deviceServerFileName = "bunq_device_server.json"
 	}
 
+	sessionServerFileName, exists := os.LookupEnv("BUNQ_SESSION_SERVER_FILE_NAME")
+	if !exists {
+		sessionServerFileName = "bunq_session_server.json"
+	}
+
 	userAgent, exists := os.LookupEnv("BUNQ_USER_AGENT")
 	if !exists {
 		userAgent = "BunqFireflySync/1.0"
@@ -88,13 +94,14 @@ func loadBunqConfig() (*BunqConfig, error) {
 	permittedIpsSplitted := strings.Split(permittedIps, ",")
 
 	return &BunqConfig{
-		ApiBaseUrl:           apiBaseUrl,
-		ApiKey:               apiKey,
-		PrivateKeyFileName:   privateKeyFileName,
-		PublicKeyFileName:    publicKeyFileName,
-		InstallationFileName: installationFileName,
-		DeviceServerFileName: deviceServerFileName,
-		UserAgent:            userAgent,
-		PermittedIps:         permittedIpsSplitted,
+		ApiBaseUrl:            apiBaseUrl,
+		ApiKey:                apiKey,
+		PrivateKeyFileName:    privateKeyFileName,
+		PublicKeyFileName:     publicKeyFileName,
+		InstallationFileName:  installationFileName,
+		DeviceServerFileName:  deviceServerFileName,
+		SessionServerFileName: sessionServerFileName,
+		UserAgent:             userAgent,
+		PermittedIps:          permittedIpsSplitted,
 	}, nil
 }
