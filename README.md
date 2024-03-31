@@ -18,3 +18,5 @@ Configuration is done using environment variables:
 | BUNQ_SESSION_SERVER_FILE_NAME | bunq_session_server.json | |
 | BUNQ_USER_AGENT | BunqFireflySync/1.0 | |
 | BUNQ_PERMITTED_IPS | * | Comma-separated list with all ips that are allowed to use the bunq api key |
+| FIREFLY_API_BASE_URL | | |
+| FIREFLY_API_KEY | | |
