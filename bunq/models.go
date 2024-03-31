@@ -27,6 +27,12 @@ type BunqPointer struct {
 	Name  string `json:"name"`
 }
 
+type BunqPagination struct {
+	FutureUrl string `json:"future_url"`
+	NewerUrl  string `json:"newer_url"`
+	OlderUrl  string `json:"older_url"`
+}
+
 // BUNQ INSTALLATION MODELS
 
 type BunqInstallationRequest struct {
@@ -137,4 +143,35 @@ func (account *BunqMonetaryAccountBank) GetIBAN() (string, error) {
 	}
 
 	return "", errors.New("iban not found")
+}
+
+// BUNQ PAYMENT MODELS
+
+type BunqPaymentsResponse struct {
+	Response   []*BunqPaymentResponse `json:"Response"`
+	Pagination *BunqPagination        `json:"Pagination"`
+}
+
+type BunqPaymentResponse struct {
+	Payment *BunqPayment `json:"Payment"`
+}
+
+type BunqPayment struct {
+	Id                   int                         `json:"id"`
+	Created              string                      `json:"created"`
+	Updated              string                      `json:"updated"`
+	MonetaryAccountId    int                         `json:"monetary_account_id"`
+	Amount               *BunqAmount                 `json:"amount"`
+	Description          string                      `json:"description"`
+	Type                 string                      `json:"type"`
+	MerchantReference    string                      `json:"merchant_reference"`
+	BalanceAfterMutation *BunqAmount                 `json:"balance_after_mutation"`
+	Alias                *BunqPaymentMonetaryAccount `json:"alias"`
+	CounterpartyAlias    *BunqPaymentMonetaryAccount `json:"counterparty_alias"`
+}
+
+type BunqPaymentMonetaryAccount struct {
+	Iban        string `json:"iban"`
+	DisplayName string `json:"display_name"`
+	Country     string `json:"country"`
 }

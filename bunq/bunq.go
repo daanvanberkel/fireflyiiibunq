@@ -72,6 +72,35 @@ func (c *BunqClient) GetMonetaryBankAccounts() ([]*BunqMonetaryAccountBank, erro
 	return result, nil
 }
 
+// TODO: Add pagination support
+func (c *BunqClient) GetPayments(monetaryAccountId int) ([]*BunqPayment, error) {
+	if err := c.startSession(); err != nil {
+		return nil, err
+	}
+
+	userId, err := c.session.GetUserId()
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.client.DoBunqRequest("GET", "/user/"+strconv.Itoa(userId)+"/monetary-account/"+strconv.Itoa(monetaryAccountId)+"/payment", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var paymentResponse BunqPaymentsResponse
+	if err := json.Unmarshal(response, &paymentResponse); err != nil {
+		return nil, err
+	}
+
+	result := make([]*BunqPayment, len(paymentResponse.Response))
+	for i, payment := range paymentResponse.Response {
+		result[i] = payment.Payment
+	}
+
+	return result, nil
+}
+
 // UTILS
 
 func (c *BunqClient) boot() error {

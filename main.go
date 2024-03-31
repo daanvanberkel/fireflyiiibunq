@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -29,5 +28,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(json.Marshal(bankAccounts))
+
+	for _, bankAccount := range bankAccounts {
+		payments, err := client.GetPayments(bankAccount.Id)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println(payments)
+	}
 }
