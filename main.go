@@ -18,6 +18,20 @@ func main() {
 	log.Level = logrus.DebugLevel
 	log.Out = os.Stdout
 
+	arguments := os.Args
+	var date time.Time
+	if len(arguments) >= 2 {
+		var err error
+		date, err = time.Parse("2006-01-02", arguments[1])
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		date = time.Now()
+	}
+
+	log.WithField("date", date.Format("2006-01-02")).Info("Starting bunq -> firefly sync")
+
 	config, err := util.LoadConfig()
 	if err != nil {
 		panic(err)
@@ -46,7 +60,7 @@ func main() {
 		}
 
 		assetAccount, err := fireflyClient.FindOrCreateAssetAccount(iban, &firefly.AccountRequest{
-			Name:        bankAccount.DisplayName,
+			Name:        bankAccount.DisplayName + " - " + bankAccount.Description, // Adding description after display name to prevent naming collisions
 			Type:        firefly.AssetType,
 			Iban:        iban,
 			AccountRole: firefly.DefaultAsset,
@@ -56,7 +70,6 @@ func main() {
 			log.WithError(err).WithField("iban", iban).Error("Cannot find or create firefly account")
 			continue
 		}
-		fmt.Println(assetAccount)
 
 		lastId := 0
 		processTransactions := true
@@ -74,8 +87,6 @@ func main() {
 			}
 
 			for _, payment := range payments {
-				// TODO: Only check payments for current day (or given day using cli arguments)
-
 				paymentLogger := log.WithFields(logrus.Fields{
 					"paymentId":  payment.Id,
 					"sourceIban": payment.Alias.Iban,
@@ -83,6 +94,14 @@ func main() {
 					"date":       payment.Created,
 				})
 				isWithdrawal := payment.Amount.Value[0] == '-'
+
+				if date.Compare(payment.Created.Time) >= 1 {
+					processTransactions = false
+					paymentLogger.Info("Received payment too far in the past, stop processing")
+					continue
+				}
+
+				paymentLogger.Info("Start processing payment")
 
 				transactions, err := fireflyClient.SearchTransactions(&firefly.TransactionSearchQuery{
 					ExternalIdIs: strconv.Itoa(payment.Id),
@@ -155,10 +174,20 @@ func main() {
 					accountType = firefly.RevenueType
 				}
 
+				// Find accounts by iban
 				accounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.Iban, firefly.IbanField, accountType, 1)
 				if err != nil {
-					paymentLogger.WithError(err).Error("Cannot search for expense or revenue accounts in firefly")
+					paymentLogger.WithError(err).Error("Cannot search for expense or revenue accounts by iban in firefly")
 					continue
+				}
+
+				if accounts.Meta.Pagination.Total == 0 {
+					// Find accounts by name
+					accounts, err = fireflyClient.SearchAccounts(payment.CounterpartyAlias.DisplayName, firefly.NameField, accountType, 1)
+					if err != nil {
+						paymentLogger.WithError(err).Error("Cannot search for expense or revenue accounts by name in firefly")
+						continue
+					}
 				}
 
 				var account *firefly.AccountRead

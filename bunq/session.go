@@ -86,6 +86,7 @@ func (s *BunqSession) StartSession() error {
 	}
 
 	s.sessionServer = &sessionServer
+	s.client.SetSession(s)
 	return nil
 }
 

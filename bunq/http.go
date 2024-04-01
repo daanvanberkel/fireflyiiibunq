@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/daanvanberkel/fireflyiiibunq/util"
 	"github.com/google/uuid"
@@ -107,6 +109,26 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 		"responseRequestId": resp.Header.Get("X-Bunq-Client-Request-Id"),
 	}).Info("Response received from bunq")
 
+	if resp.StatusCode == 429 {
+		retryAfterHeader := resp.Header.Get("Retry-After")
+		log.WithField("retry-after", retryAfterHeader).Debug("Hit bunq rate limit, waiting")
+
+		var retryAfter int
+		if retryAfterHeader != "" {
+			retryAfter, err = strconv.Atoi(retryAfterHeader)
+			if err != nil {
+				log.WithError(err).Error("Cannot convert Retry-After header to int")
+				return nil, err
+			}
+		} else {
+			retryAfter = 1
+		}
+
+		log.WithField("duration", retryAfter).Info("Waiting before retrying the request")
+		time.Sleep(time.Duration(retryAfter) * time.Second)
+		return c.doActualBunqRequest(method, path, data, (try + 1))
+	}
+
 	if resp.Header.Get("X-Bunq-Client-Request-Id") != requestId.String() {
 		log.Error("Received response for another request")
 		return nil, errors.New("received response for another request")
@@ -117,16 +139,16 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		if (resp.StatusCode == 401 || resp.StatusCode == 403) && c.session != nil {
+		if (resp.StatusCode == 401 || resp.StatusCode == 403) && c.session != nil && path != "/session-server" {
 			if err := c.session.StartSession(); err != nil {
 				return nil, err
 			}
 
 			log.Info("Received 401 or 403 from bunq, possible session expiry. Retry request")
-			return c.doActualBunqRequest(method, path, data, try+1)
+			return c.doActualBunqRequest(method, path, data, (try + 1))
 		}
 
-		log.WithField("body", respBody).Warn("Received error from bunq")
+		log.WithField("body", string(respBody)).Warn("Received error from bunq")
 		return nil, errors.New(string(respBody))
 	}
 
