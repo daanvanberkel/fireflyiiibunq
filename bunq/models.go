@@ -5,6 +5,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"strings"
+	"time"
 )
 
 // BUNQ COMMON MODELS
@@ -31,6 +33,21 @@ type BunqPagination struct {
 	FutureUrl string `json:"future_url"`
 	NewerUrl  string `json:"newer_url"`
 	OlderUrl  string `json:"older_url"`
+}
+
+type BunqTime struct {
+	time.Time
+}
+
+func (bt *BunqTime) UnmarshalJSON(b []byte) (err error) {
+	s := strings.Trim(string(b), "\"")
+	if s == "null" {
+		bt.Time = time.Time{}
+		return
+	}
+
+	bt.Time, err = time.Parse("2006-01-02 15:04:05.000000", s)
+	return
 }
 
 // BUNQ INSTALLATION MODELS
@@ -118,8 +135,8 @@ type BunqMonetaryAccountBankItem struct {
 
 type BunqMonetaryAccountBank struct {
 	Id                int            `json:"id"`
-	Created           string         `json:"created"`
-	Updated           string         `json:"updated"`
+	Created           *BunqTime      `json:"created"`
+	Updated           *BunqTime      `json:"updated"`
 	Currency          string         `json:"currency"`
 	Description       string         `json:"description"`
 	Status            string         `json:"status"`
@@ -158,8 +175,8 @@ type BunqPaymentResponse struct {
 
 type BunqPayment struct {
 	Id                   int                         `json:"id"`
-	Created              string                      `json:"created"`
-	Updated              string                      `json:"updated"`
+	Created              *BunqTime                   `json:"created"`
+	Updated              *BunqTime                   `json:"updated"`
 	MonetaryAccountId    int                         `json:"monetary_account_id"`
 	Amount               *BunqAmount                 `json:"amount"`
 	Description          string                      `json:"description"`

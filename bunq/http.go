@@ -105,7 +105,7 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 		"statusCode":        resp.StatusCode,
 		"bodyLength":        len(respBody),
 		"responseRequestId": resp.Header.Get("X-Bunq-Client-Request-Id"),
-	}).Debug("Response received from bunq")
+	}).Info("Response received from bunq")
 
 	if resp.Header.Get("X-Bunq-Client-Request-Id") != requestId.String() {
 		log.Error("Received response for another request")
