@@ -121,7 +121,7 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 				return nil, err
 			}
 		} else {
-			retryAfter = 1
+			retryAfter = 3
 		}
 
 		log.WithField("duration", retryAfter).Info("Waiting before retrying the request")

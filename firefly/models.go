@@ -201,5 +201,6 @@ type TransactionSplitRequest struct {
 }
 
 type TransactionRequest struct {
-	Transactions []*TransactionSplitRequest `json:"transactions"`
+	Transactions         []*TransactionSplitRequest `json:"transactions"`
+	ErrorIfDuplicateHash bool                       `json:"error_if_duplicate_hash"`
 }

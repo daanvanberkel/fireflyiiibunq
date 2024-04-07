@@ -15,7 +15,7 @@ import (
 
 func main() {
 	log := logrus.New()
-	log.Level = logrus.DebugLevel
+	log.Level = logrus.InfoLevel
 	log.Out = os.Stdout
 
 	arguments := os.Args
@@ -118,46 +118,15 @@ func main() {
 					continue
 				}
 
-				counterpartyAssetAccounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.Iban, firefly.IbanField, firefly.AssetType, 1)
+				counterPartyAssetAccount, err := findCounterPartyAssetAccount(fireflyClient, payment, paymentLogger)
 				if err != nil {
 					paymentLogger.WithError(err).Error("Failed searching for counterparty asset account, skipping payment")
 					continue
 				}
 
-				if counterpartyAssetAccounts.Meta.Pagination.Total > 0 {
+				if counterPartyAssetAccount != nil {
 					// Make a transfer between two asset accounts
-					counterpartyAssetAccount := counterpartyAssetAccounts.Data[0]
-
-					var sourceId string
-					if isWithdrawal {
-						sourceId = assetAccount.Id
-					} else {
-						sourceId = counterpartyAssetAccount.Id
-					}
-
-					var destinationId string
-					if isWithdrawal {
-						destinationId = counterpartyAssetAccount.Id
-					} else {
-						destinationId = assetAccount.Id
-					}
-
-					transaction := &firefly.TransactionSplitRequest{
-						Type:          firefly.TransferTransaction,
-						Date:          &payment.Created.Time,
-						Amount:        strings.Trim(payment.Amount.Value, "-"),
-						Description:   payment.Description,
-						CurrencyCode:  payment.Amount.Currency,
-						SourceId:      sourceId,
-						DestinationId: destinationId,
-						Notes:         "Created by Bunq sync on " + time.Now().String(),
-						ExternalId:    strconv.Itoa(payment.Id),
-					}
-
-					_, err := fireflyClient.CreateTransaction(&firefly.TransactionRequest{
-						Transactions: []*firefly.TransactionSplitRequest{transaction},
-					})
-					if err != nil {
+					if err := createTransactionSplitForPayment(firefly.TransferTransaction, payment, assetAccount.Id, counterPartyAssetAccount.Id, fireflyClient, true); err != nil {
 						paymentLogger.WithError(err).Error("Cannot create new transaction in firefly")
 						continue
 					}
@@ -174,38 +143,10 @@ func main() {
 					accountType = firefly.RevenueType
 				}
 
-				// Find accounts by iban
-				accounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.Iban, firefly.IbanField, accountType, 1)
+				account, err := findOrCreateAccountForPayment(fireflyClient, payment, accountType, paymentLogger)
 				if err != nil {
 					paymentLogger.WithError(err).Error("Cannot search for expense or revenue accounts by iban in firefly")
 					continue
-				}
-
-				if accounts.Meta.Pagination.Total == 0 {
-					// Find accounts by name
-					accounts, err = fireflyClient.SearchAccounts(payment.CounterpartyAlias.DisplayName, firefly.NameField, accountType, 1)
-					if err != nil {
-						paymentLogger.WithError(err).Error("Cannot search for expense or revenue accounts by name in firefly")
-						continue
-					}
-				}
-
-				var account *firefly.AccountRead
-				if accounts.Meta.Pagination.Total > 0 {
-					account = accounts.Data[0]
-				} else {
-					// Create new account in firefly
-					accountRequest := &firefly.AccountRequest{
-						Name:  payment.CounterpartyAlias.DisplayName,
-						Type:  accountType,
-						Iban:  payment.CounterpartyAlias.Iban,
-						Notes: "Created by Bunq sync on " + time.Now().String(),
-					}
-					account, err = fireflyClient.CreateAccount(accountRequest)
-					if err != nil {
-						paymentLogger.WithError(err).WithField("request", accountRequest).Error("Cannot create new account in firefly")
-						continue
-					}
 				}
 
 				var transactionType firefly.TransactionType
@@ -215,36 +156,8 @@ func main() {
 					transactionType = firefly.DepositTransaction
 				}
 
-				var sourceId string
-				if isWithdrawal {
-					sourceId = assetAccount.Id
-				} else {
-					sourceId = account.Id
-				}
-
-				var destinationId string
-				if isWithdrawal {
-					destinationId = account.Id
-				} else {
-					destinationId = assetAccount.Id
-				}
-
-				transaction := &firefly.TransactionSplitRequest{
-					Type:          transactionType,
-					Date:          &payment.Created.Time,
-					Amount:        strings.Trim(payment.Amount.Value, "-"),
-					Description:   payment.Description,
-					CurrencyCode:  payment.Amount.Currency,
-					SourceId:      sourceId,
-					DestinationId: destinationId,
-					Notes:         "Created by Bunq sync on " + time.Now().String(),
-					ExternalId:    strconv.Itoa(payment.Id),
-				}
-				_, err = fireflyClient.CreateTransaction(&firefly.TransactionRequest{
-					Transactions: []*firefly.TransactionSplitRequest{transaction},
-				})
-				if err != nil {
-					paymentLogger.WithError(err).WithField("request", transaction).Error("Cannot create new transaction in firefly")
+				if err := createTransactionSplitForPayment(transactionType, payment, assetAccount.Id, account.Id, fireflyClient, false); err != nil {
+					paymentLogger.WithError(err).Error("Cannot create new transaction in firefly")
 					continue
 				}
 
@@ -254,4 +167,94 @@ func main() {
 			lastId = payments[len(payments)-1].Id
 		}
 	}
+}
+
+func findCounterPartyAssetAccount(fireflyClient *firefly.FireflyClient, payment *bunq.BunqPayment, log *logrus.Entry) (*firefly.AccountRead, error) {
+	if payment.CounterpartyAlias.Iban == "" {
+		return nil, nil
+	}
+
+	counterpartyAssetAccounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.Iban, firefly.IbanField, firefly.AssetType, 1)
+	if err != nil {
+		log.WithError(err).Error("Failed searching for counterparty asset account, skipping payment")
+		return nil, err
+	}
+
+	if counterpartyAssetAccounts.Meta.Pagination.Total == 0 {
+		return nil, nil
+	}
+
+	return counterpartyAssetAccounts.Data[0], nil
+}
+
+func findOrCreateAccountForPayment(fireflyClient *firefly.FireflyClient, payment *bunq.BunqPayment, accountType firefly.AccountType, log *logrus.Entry) (*firefly.AccountRead, error) {
+	if payment.CounterpartyAlias.Iban != "" {
+		// Find accounts by iban
+		accounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.Iban, firefly.IbanField, accountType, 1)
+		if err != nil {
+			log.WithError(err).Error("Cannot search for expense or revenue accounts by iban in firefly")
+			return nil, err
+		}
+
+		if accounts.Meta.Pagination.Total > 0 {
+			return accounts.Data[0], nil
+		}
+	}
+
+	if payment.CounterpartyAlias.DisplayName != "" {
+		// Find accounts by name
+		accounts, err := fireflyClient.SearchAccounts(payment.CounterpartyAlias.DisplayName, firefly.NameField, accountType, 1)
+		if err != nil {
+			log.WithError(err).Error("Cannot search for expense or revenue accounts by name in firefly")
+			return nil, err
+		}
+
+		if accounts.Meta.Pagination.Total > 0 {
+			return accounts.Data[0], nil
+		}
+	}
+
+	// Create new account in firefly
+	accountRequest := &firefly.AccountRequest{
+		Name:  payment.CounterpartyAlias.DisplayName,
+		Type:  accountType,
+		Iban:  payment.CounterpartyAlias.Iban,
+		Notes: "Created by Bunq sync on " + time.Now().String(),
+	}
+	return fireflyClient.CreateAccount(accountRequest)
+}
+
+func createTransactionSplitForPayment(transactionType firefly.TransactionType, payment *bunq.BunqPayment, sourceId string, destinationId string, fireflyClient *firefly.FireflyClient, errorIfDuplicateHash bool) error {
+	var description string
+	if payment.Description == "" {
+		description = "(empty)"
+	} else {
+		description = payment.Description
+	}
+
+	isWithdrawal := payment.Amount.Value[0] == '-'
+
+	oldSourceId := sourceId
+	if !isWithdrawal {
+		sourceId = destinationId
+		destinationId = oldSourceId
+	}
+
+	transaction := &firefly.TransactionSplitRequest{
+		Type:          transactionType,
+		Date:          &payment.Created.Time,
+		Amount:        strings.Trim(payment.Amount.Value, "-"),
+		Description:   description,
+		CurrencyCode:  payment.Amount.Currency,
+		SourceId:      sourceId,
+		DestinationId: destinationId,
+		Notes:         "Created by Bunq sync on " + time.Now().String(),
+		ExternalId:    strconv.Itoa(payment.Id),
+	}
+	_, err := fireflyClient.CreateTransaction(&firefly.TransactionRequest{
+		Transactions:         []*firefly.TransactionSplitRequest{transaction},
+		ErrorIfDuplicateHash: errorIfDuplicateHash,
+	})
+
+	return err
 }

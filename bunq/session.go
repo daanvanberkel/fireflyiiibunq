@@ -52,6 +52,7 @@ func (s *BunqSession) GetUserId() (int, error) {
 func (s *BunqSession) StartSession() error {
 	s.log.Debug("Start new session")
 
+	s.client.SetSession(nil)
 	response, err := s.client.DoBunqRequest("POST", "/session-server", BunqSessionServerRequest{
 		Secret: s.apiKey,
 	})
