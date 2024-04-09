@@ -107,7 +107,7 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 		"statusCode":        resp.StatusCode,
 		"bodyLength":        len(respBody),
 		"responseRequestId": resp.Header.Get("X-Bunq-Client-Request-Id"),
-	}).Info("Response received from bunq")
+	}).Debug("Response received from bunq")
 
 	if resp.StatusCode == 429 {
 		retryAfterHeader := resp.Header.Get("Retry-After")
@@ -124,7 +124,7 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 			retryAfter = 3
 		}
 
-		log.WithField("duration", retryAfter).Info("Waiting before retrying the request")
+		log.WithField("duration", retryAfter).Debug("Waiting before retrying the request")
 		time.Sleep(time.Duration(retryAfter) * time.Second)
 		return c.doActualBunqRequest(method, path, data, (try + 1))
 	}
@@ -139,16 +139,17 @@ func (c *BunqHttpClient) doActualBunqRequest(method string, path string, data in
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.WithField("body", string(respBody)).Warn("Received error from bunq")
+
 		if (resp.StatusCode == 401 || resp.StatusCode == 403) && c.session != nil && path != "/session-server" {
 			if err := c.session.StartSession(); err != nil {
 				return nil, err
 			}
 
-			log.Info("Received 401 or 403 from bunq, possible session expiry. Retry request")
+			log.Debug("Received 401 or 403 from bunq, possible session expiry. Retry request")
 			return c.doActualBunqRequest(method, path, data, (try + 1))
 		}
 
-		log.WithField("body", string(respBody)).Warn("Received error from bunq")
 		return nil, errors.New(string(respBody))
 	}
 
@@ -177,7 +178,7 @@ func (c *BunqHttpClient) setDefaultHeaders(request *http.Request, requestId *uui
 	}
 
 	if c.installation == nil && c.session == nil {
-		log.Info("Both installation and session tokens are missing, continuing without authentication")
+		log.Debug("Both installation and session tokens are missing, continuing without authentication")
 	}
 
 	return nil
@@ -195,7 +196,7 @@ func (c *BunqHttpClient) signRequestBody(request *http.Request, body []byte, log
 	}
 
 	if c.keyChain == nil {
-		log.Info("Keychain missing, continuing without signing the request")
+		log.Debug("Keychain missing, continuing without signing the request")
 	}
 
 	return nil
@@ -226,7 +227,7 @@ func (c *BunqHttpClient) validateServerResponseBody(response *http.Response, res
 	}
 
 	if c.installation == nil {
-		log.Info("Bunq installation missing, continuing without server signature validation")
+		log.Debug("Bunq installation missing, continuing without server signature validation")
 	}
 
 	return nil

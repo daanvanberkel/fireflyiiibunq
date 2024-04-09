@@ -72,7 +72,7 @@ func (c *FireflyClient) FindOrCreateAssetAccount(iban string, request *AccountRe
 
 	for _, account := range accounts.Data {
 		if account.Attributes.AccountRole == DefaultAsset {
-			c.log.WithField("iban", iban).Info("Found existing account")
+			c.log.WithField("iban", iban).Debug("Found existing account")
 			return account, nil
 		}
 	}
