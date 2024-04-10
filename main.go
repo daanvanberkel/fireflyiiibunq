@@ -29,6 +29,7 @@ func main() {
 	} else {
 		date = time.Now()
 	}
+	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 
 	log.WithField("date", date.Format("2006-01-02")).Info("Starting bunq -> firefly sync")
 
